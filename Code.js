@@ -154,10 +154,13 @@ function runOnEdit(e) {
     if (e.value !== 'TRUE') return;
 
     const a1 = e.range.getA1Notation();
-    if (a1 === 'J3') {
+    if (event.range.rowStart === event.range.rowEnd && event.range.columnStart === event.range.columnEnd) {
+      const checkImport = sheet.getRange(event.range.rowStart - 1,event.range.columnStart).getValue();
+      if (checkImport !== 'Import') return;
       e.range.setValue(false); //Reset the checkbox
       importData();
     }
+    else return;
   }
 }
 
