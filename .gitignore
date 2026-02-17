@@ -1,6 +1,6 @@
 # Clasp files #
 ###############
-.clasp.json
+*clasp.json
 .claspignore
 
 # Compiled source #

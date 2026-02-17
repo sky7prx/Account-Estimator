@@ -78,7 +78,7 @@ function runOnEdit(e) {
   while (log.length > logLength) log.shift(); //Trim the log, if necessary
   props.setProperty('installableLog',JSON.stringify(log)); //Save the log to the properties service
 
-  const ss = SpreadsheetApp.getActive();
+  //const ss = SpreadsheetApp.getActive(); //Not used, commenting to save execution time
   const event = JSON.parse(JSON.stringify(e)); //Save the event variable in a way that's faster and easier to read
   console.log(event);
 
@@ -88,7 +88,7 @@ function runOnEdit(e) {
   const sheet = e.range.getSheet();
   const sheetName = sheet.getName();
 
-  const actionSheets = ['Transactions','Archived Transactions','Recurring Transactions']; //List of sheets that have runOnEdit triggers
+  const actionSheets = ['Transactions','Archived Transactions','Recurring Transactions','Import Tool']; //List of sheets that have runOnEdit triggers
 
   if (!actionSheets.includes(sheetName)) return; //End execution if the end was not on a sheet in the list
 
@@ -150,6 +150,15 @@ function runOnEdit(e) {
       archive();
     }
   }
+  if (sheetName === 'Import Tool') {
+    if (e.value !== 'TRUE') return;
+
+    const a1 = e.range.getA1Notation();
+    if (a1 === 'J3') {
+      e.range.setValue(false); //Reset the checkbox
+      importData();
+    }
+  }
 }
 
 //Place the list of planned recurring transactions onto the Transactions tab and also create a new sheet for the selected month.
@@ -197,25 +206,29 @@ function placeRecurring() {
   const oneDay = 24 * 60 * 60 * 1000; //One day in miliseconds
 
   //Get the recurring Expenses and sort them by date
-  const expenses = recurSheet.getRange(`A${firstRecurRow}:D`).getValues().filter(r => r.join("") !== "").sort((a,b) => a[0] - b[0]).map(r => {
-    r[0] = r[0] > maxDates[month] ? setDate(maxDates[month]) : setDate(r[0]); //Replace the day number with a full date being sure not to exceed the maximum number of days in the month
-    while (holidays.includes(r[0].toLocaleDateString()) || isWeekend(r[0])) { //Check if date is on a weekend of holiday, repeat as necessary
-      r[0] = new Date(r[0].getTime() - oneDay); //Move it earlier by one day if it's on a weekend or a holiday
-    }
-    r[1] = isNaN(r[1]) ? "" : r[1]; //Process the transaction without a fixed amount if no number is given for the amount
-    r.splice(2,0,""); //Add another blank column to leave room for the actual amount on the Transactions tab
-    return r;
-  });
+  const expenseData = recurSheet.getRange(`A${firstRecurRow}:D`).getValues();
+  const expenses = !expenseData.join('') ? expenseData :
+    expenseData.filter(r => r.join("") !== "").sort((a,b) => a[0] - b[0]).map(r => {
+      r[0] = r[0] > maxDates[month] ? setDate(maxDates[month]) : setDate(r[0]); //Replace the day number with a full date being sure not to exceed the maximum number of days in the month
+      while (holidays.includes(r[0].toLocaleDateString()) || isWeekend(r[0])) { //Check if date is on a weekend of holiday, repeat as necessary
+        r[0] = new Date(r[0].getTime() - oneDay); //Move it earlier by one day if it's on a weekend or a holiday
+      }
+      r[1] = isNaN(r[1]) ? "" : r[1]; //Process the transaction without a fixed amount if no number is given for the amount
+      r.splice(2,0,""); //Add another blank column to leave room for the actual amount on the Transactions tab
+      return r;
+    });
   //Repeat the same logic as above for the recurring Income list
-  const income = recurSheet.getRange(`F${firstRecurRow}:I`).getValues().filter(r => r.join("") !== "").sort((a,b) => a[0] - b[0]).map(r => {
-    r[0] = r[0] > maxDates[month] ? setDate(maxDates[month]) : setDate(r[0]);
-    while (holidays.includes(r[0].toLocaleDateString()) || isWeekend(r[0])) {
-      r[0] = new Date(r[0].getTime() - oneDay);
-    }
-    r[1] = isNaN(r[1]) ? "" : r[1];
-    r.splice(2,0,"");
-    return r;
-  });
+  const incomeData = recurSheet.getRange(`F${firstRecurRow}:I`).getValues();
+  const income = !incomeData.join('') ? incomeData :
+    incomeData.filter(r => r.join("") !== "").sort((a,b) => a[0] - b[0]).map(r => {
+      r[0] = r[0] > maxDates[month] ? setDate(maxDates[month]) : setDate(r[0]);
+      while (holidays.includes(r[0].toLocaleDateString()) || isWeekend(r[0])) {
+        r[0] = new Date(r[0].getTime() - oneDay);
+      }
+      r[1] = isNaN(r[1]) ? "" : r[1];
+      r.splice(2,0,"");
+      return r;
+    });
 
   const transExp = transSheet.getRange(`B${firstTransRow}:F`).getValues(); //Get the list of expenses already on the Transactions tab
   const transInc = transSheet.getRange(`I${firstTransRow}:M`).getValues(); //Get the list of income already on the Transactions tab
@@ -231,8 +244,10 @@ function placeRecurring() {
   if (!completedMonths.includes(month + year)) completedMonths.push(month + year); //Add this month to the list of processed months
   props.setProperty('months',JSON.stringify(completedMonths)); //Save the list of processed months to the properties service
 
-  transSheet.getRange(nextExpRow,2,expenses.length,expenses[0].length).setValues(expenses); //Write the Expenses to the Transactions tab
-  transSheet.getRange(nextIncRow,9,income.length,income[0].length).setValues(income); //Write the list of Income to the Transactions tab
+  if (expenses.join(''))
+    transSheet.getRange(nextExpRow,2,expenses.length,expenses[0].length).setValues(expenses); //Write the Expenses to the Transactions tab
+  if (income.join(''))
+    transSheet.getRange(nextIncRow,9,income.length,income[0].length).setValues(income); //Write the list of Income to the Transactions tab
 
   transSheet.getRange(`B${firstTransRow}:F`).sort({column: 2, ascending: false}); //Sort the list of Expenses
   transSheet.getRange(`I${firstTransRow}:M`).sort({column: 9, ascending: false}); //Sort the list of Income
@@ -246,6 +261,7 @@ function placeRecurring() {
     nextMonthSheet = prevMonthSheet.copyTo(ss).setName(nextSheetName); //Copy the prior month's sheet and rename it
     nextMonthSheet.getRange('C7').setValue(setDate(1)); //Set the start date of the new month's sheet
     nextMonthSheet.getRange('O12').setValue(""); //Reset the notes for the new sheet
+    nextMonthSheet.getRange('L8').setValue(""); //Clear the prior month's starting value in case it was set manually
     nextMonthSheet.setActiveRange(nextMonthSheet.getRange('A1')); //Activate the new sheet
     ss.moveActiveSheet(2); //Sort the new sheet ahead of the previous
   }
@@ -377,6 +393,76 @@ function advanceTransactions (param = 'To tomorrow') {
   //sortTrans(); //Sorts every time this function is ran
 }
 
+//Process the data from the Import Tools tab to the Transactions tab
+function importData () {
+  const ss = SpreadsheetApp.getActive();
+  const inSheet = ss.getSheetByName('Import Tool');
+  const outSheet = ss.getSheetByName('Transactions');
+  const inValues = inSheet.getDataRange().getValues();
+  const outValues = outSheet.getDataRange().getValues();
+  const headerRow = outValues.findIndex(v => v.includes('Plan Amount')); //Find the index of the header row
+  const inHeaders = inValues.shift(); //Save the headers for the import data
+  const outHeaders = outValues[headerRow]; //Save the headers for the transaction data
+
+  const inExp = inValues.filter(v => { //Extract the expenses
+    return v[inHeaders.indexOf('Withdrawal')];
+  });
+  const inInc = inValues.filter(v => { //Extract the income
+    return v[inHeaders.indexOf('Deposit')];
+  });
+
+  const outExp = inExp.map(v => { //Format the expenses to match the Transactions tab
+    return [
+      v[inHeaders.indexOf('Date')],
+      v[inHeaders.indexOf('Withdrawal')],
+      v[inHeaders.indexOf('Withdrawal')],
+      v[inHeaders.indexOf('Description')]
+    ];
+  });
+  const outInc = inInc.map(v => { //Format the income to match the Transactions tab
+    return [
+      v[inHeaders.indexOf('Date')],
+      v[inHeaders.indexOf('Deposit')],
+      v[inHeaders.indexOf('Deposit')],
+      v[inHeaders.indexOf('Description')]
+    ];
+  });
+
+  const transData = [...outValues]; 
+  transData.splice(0,headerRow + 1); //Get a new array with only the Transaction data
+  const expCols = [ //Find the column indecies for the expenses
+    outHeaders.indexOf('Date'),
+    outHeaders.indexOf('Plan Amount'),
+    outHeaders.indexOf('Actual Amount'),
+    outHeaders.indexOf('Description')
+  ];
+  const incCols = [ //Find the column indecies for the income
+    outHeaders.lastIndexOf('Date'),
+    outHeaders.lastIndexOf('Plan Amount'),
+    outHeaders.lastIndexOf('Actual Amount'),
+    outHeaders.lastIndexOf('Description')
+  ];
+
+  const expTrans = selectColumns(transData, expCols); //Get arrays of just the expense data
+  const incTrans = selectColumns(transData, incCols); //Get arrays of just the income data
+
+ const nextRow = rng => rng.reduce((lastIndex,row,rowIndex) => { //Find the next empty row in a given range
+    if (row.join('') !== '') return rowIndex + 1;
+    return lastIndex;
+  },0);
+
+  const nextExpRow = nextRow(expTrans) + headerRow + 2; //Returns the next empty expenses row on the archive sheet
+  const nextIncRow = nextRow(incTrans) + headerRow + 2; //Returns the next empty income row on the archive sheet
+
+  outSheet.getRange(nextExpRow,outHeaders.indexOf('Date')+1,outExp.length,outExp[0].length).setValues(outExp);
+  outSheet.getRange(nextIncRow,outHeaders.lastIndexOf('Date')+1,outInc.length,outInc[0].length).setValues(outInc);
+
+  const inCols = inHeaders.filter(Boolean).length; //Get the number of columns in the import sheet
+  inSheet.getRange(2,1,inSheet.getLastRow(),inCols).clear(); //Clears the imported data
+
+  sortTrans(); //Sort the Transactions tab
+}
+
 //Sort the transactions by date
 function sortTrans(sheetName = 'Transactions') {
   const ss = SpreadsheetApp.getActive();
@@ -410,4 +496,14 @@ function getHolidays(year = 2026) {
     console.log("Error: " + e.toString());
     return [];
   }
+}
+
+// Function to keep only columns at selected indices
+function selectColumns(dataArray, columnIndicesToSelect) {
+    return dataArray.map(row => {
+        // Use filter to select elements whose index is in the list of indices given
+        return row.filter((cell, cellIndex) => {
+            return columnIndicesToSelect.includes(cellIndex);
+        });
+    });
 }
