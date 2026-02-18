@@ -49,10 +49,12 @@ function onEdit (e) {
   const log = JSON.parse(props.getProperty('simpleLog')) || []; //This is the log of times the simple trigger ran
   const log2 = JSON.parse(props.getProperty('installableLog')) || []; //This is the log of times the installable trigger ran
   const buffer = 2 * 60 * 1000; //calculate a buffer in miliseconds (2 minutes)
+
   let match = false;
   for (let i = 0; i < log.length; i++) {
     for (let j = 0; j < log2.length; j++) {
-      if (Math.abs(log[i] - log2[j]) <= buffer) { //Check to see if there's a matching entry within the buffer of each other        match = true; //Record if we've found at least 1 timestamp on both logs that are within 2 minutes of each other
+      if (Math.abs(log[i] - log2[j]) <= buffer) { //Check to see if there's a matching entry within the buffer of each other
+        match = true; //Record if we've found at least 1 timestamp on both logs that are within 2 minutes of each other
         break;
       }
     }
