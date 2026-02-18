@@ -82,8 +82,6 @@ function runOnEdit(e) {
   const event = JSON.parse(JSON.stringify(e)); //Save the event variable in a way that's faster and easier to read
   console.log(event);
 
-  const firstTransRow = 5; //This is the row of the first transaction on the Transactions tab
-
   /** @type {SpreadsheetApp.Sheet} */
   const sheet = e.range.getSheet();
   const sheetName = sheet.getName();
@@ -93,74 +91,74 @@ function runOnEdit(e) {
   if (!actionSheets.includes(sheetName)) return; //End execution if the end was not on a sheet in the list
 
   if (sheetName === 'Transactions') {
-    const a1 = e.range.getA1Notation();
-    if (a1 === 'K3') { //Advance late transactions
-      if (!['To today','To tomorrow'].includes(e.value)) return; //Allow user to select between two options to advance the date
+    if (event.range.rowStart === event.range.rowEnd && event.range.columnStart === event.range.columnEnd) { //If only one cell was edited
+      const checkTitle = sheet.getRange(event.range.rowStart - 1,event.range.columnStart).getValue(); //Get the title of the checked box
+      if (checkTitle === 'Advance Late Transactions') { //Advance late transactions
+        if (!['To today','To tomorrow'].includes(e.value)) return; //Allow user to select between two options to advance the date
 
-      e.range.setValue(''); //Reset the selector
-      advanceTransactions(e.value);
+        e.range.setValue(''); //Reset the selector
+        advanceTransactions(e.value);
+      }
+
+      if (e.value !== 'TRUE') return; //End if the edited cell wasn't a checkbox
+
+      if (checkTitle === 'Sort Transactions') { //Sort transactions
+        e.range.setValue(false); //Reset the checkbox
+        sortTrans();
+      }
+      if (checkTitle === 'Change Selected to Today') { //Change selected to today
+        e.range.setValue(false); //Reset the checkbox
+        reconcile('today',true);
+      }
+      if (checkTitle === 'Reconcile Selected as Planned') {
+        e.range.setValue(false);
+        reconcile();
+      }
+      if (checkTitle === 'Reconcile Selected as Planned for Today') {
+        e.range.setValue(false);
+        reconcile('today');
+      }
     }
-    if (a1 === 'L3') { //Sort transactions
-      if (e.value !== 'TRUE') return;
-
-      e.range.setValue(false); //Reset the checkbox
-      sortTrans();
-    }
-    if (a1 === 'G3') { //Change selected to today
-      if (e.value !== 'TRUE') return;
-
-      e.range.setValue(false); //Reset the checkbox
-      
-      const today = new Date(new Date().toLocaleDateString()); //Set the date from a string so we can take time out of it to make it easier to compare dates
-      const sheetVals = sheet.getDataRange().getValues(); //We need to load all of the values to search for checked boxes
-
-      const firstIndex = sheetVals[firstTransRow - 2].indexOf('Date') - 1; //Get the first column labeled Date in the header row and decrease by 1
-      const lastIndex = sheetVals[firstTransRow - 2].lastIndexOf('Date') - 1; //Get the last column labeled Date in the header row and decrease by 1
-      sheetVals.forEach((v,i) => {
-        if (v[firstIndex] === true || v[firstIndex] === 'TRUE') //Look for any rows in the Expenses column that's checked
-          sheet.getRange(1 + i,1 + firstIndex,1,2).setValues([[false,today]]); //Reset the checkbox and change the date to today
-      });
-      sheetVals.forEach((v,i) => {
-        if (v[lastIndex] === true || v[lastIndex] === 'TRUE') //Look for any rows in the Income column that's checked
-          sheet.getRange(1 + i,1 + lastIndex,1,2).setValues([[false,today]]); //Reset the checkbox and change the date to today
-      });
-      
-      //sortTrans();
-    }
+    return;
   }
   if (sheetName === 'Archived Transactions') {
-    if (e.value !== 'TRUE') return;
+    if (event.range.rowStart === event.range.rowEnd && event.range.columnStart === event.range.columnEnd) {//If only one cell was edited
+      if (e.value !== 'TRUE') return;
 
-    const a1 = e.range.getA1Notation();
-    if (a1 === 'L3') {
-      e.range.setValue(false); //Reset the checkbox
-      sortTrans(sheetName);
+      const checkTitle = sheet.getRange(event.range.rowStart - 1,event.range.columnStart).getValue(); //Get the title of the checked box
+      if (checkTitle === 'Sort Transactions') {
+        e.range.setValue(false); //Reset the checkbox
+        sortTrans(sheetName);
+      }
     }
+    return;
   }
   if (sheetName === 'Recurring Transactions') {
-    if (e.value !== 'TRUE') return;
+    if (event.range.rowStart === event.range.rowEnd && event.range.columnStart === event.range.columnEnd) {//If only one cell was edited
+      if (e.value !== 'TRUE') return;
 
-    const a1 = e.range.getA1Notation();
-    if (a1 === 'K5') {
-      e.range.setValue(false); //Reset the checkbox
-      placeRecurring();
+      const checkTitle = sheet.getRange(event.range.rowStart,event.range.columnStart + 1).getValue(); //Get the title of the checked box
+      if (checkTitle === 'Process Month') {
+        e.range.setValue(false); //Reset the checkbox
+        placeRecurring();
+      }
+      if (checkTitle === 'Archive Month') {
+        e.range.setValue(false); //Reset the checkbox
+        archive();
+      }
     }
-    if (a1 === 'K10') {
-      e.range.setValue(false); //Reset the checkbox
-      archive();
-    }
+    return;
   }
   if (sheetName === 'Import Tool') {
     if (e.value !== 'TRUE') return;
 
-    const a1 = e.range.getA1Notation();
-    if (event.range.rowStart === event.range.rowEnd && event.range.columnStart === event.range.columnEnd) {
+    if (event.range.rowStart === event.range.rowEnd && event.range.columnStart === event.range.columnEnd) { //If only one cell was edited
       const checkImport = sheet.getRange(event.range.rowStart - 1,event.range.columnStart).getValue();
       if (checkImport !== 'Import') return;
       e.range.setValue(false); //Reset the checkbox
       importData();
     }
-    else return;
+    return;
   }
 }
 
@@ -394,6 +392,40 @@ function advanceTransactions (param = 'To tomorrow') {
 
   if (needsSort) sortTrans(); //Only sorts when transactions have been advanced
   //sortTrans(); //Sorts every time this function is ran
+}
+
+function reconcile (requestedDate = false, dateOnly = false) {
+  const date = requestedDate ? (
+    requestedDate === 'today' ?
+    new Date(new Date().toLocaleDateString()) : //Get today's date if requested
+    new Date(requestedDate) //Get the requested date
+  ) : false;
+
+  console.log(date);
+
+  const ss = SpreadsheetApp.getActive();
+  const sheet = ss.getSheetByName('Transactions');
+  const sheetVals = sheet.getDataRange().getValues(); //We need to load all of the values to search for checked boxes
+  const headerRow = sheetVals.findIndex(v => v.includes('Plan Amount')); //Find the index of the header row
+
+  const firstIndex = sheetVals[headerRow].indexOf('Date') - 1; //Get the first column labeled Date in the header row and decrease by 1
+  const lastIndex = sheetVals[headerRow].lastIndexOf('Date') - 1; //Get the last column labeled Date in the header row and decrease by 1
+  sheetVals.forEach((v,i) => {
+    if (v[firstIndex] === true || v[firstIndex] === 'TRUE') { //Look for any rows in the Expenses column that's checked
+      const outputDate = date ? date : v[firstIndex + 1];
+      const amount = v[firstIndex + 2];
+      const output = dateOnly ? [false,outputDate] : [false,outputDate,amount,amount];
+      sheet.getRange(1 + i, 1 + firstIndex, 1, output.length).setValues([output]); //Reset the checkbox and set the requested values
+    }
+  });
+  sheetVals.forEach((v,i) => {
+    if (v[lastIndex] === true || v[lastIndex] === 'TRUE') { //Look for any rows in the Income column that's checked
+      const outputDate = date ? date : v[lastIndex + 1];
+      const amount = v[lastIndex + 2];
+      const output = dateOnly ? [false,outputDate] : [false,outputDate,amount,amount];
+      sheet.getRange(1 + i, 1 + lastIndex, 1, output.length).setValues([output]); //Reset the checkbox and change the date to today
+    }
+  });
 }
 
 //Process the data from the Import Tools tab to the Transactions tab
