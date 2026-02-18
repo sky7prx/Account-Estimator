@@ -11,6 +11,7 @@ function onOpen (e) {
   const props = PropertiesService.getDocumentProperties();
   const initialized = props.getProperty('init'); //We're using a script property to track if the trigger is installed
   if (initialized !== 'true') {
+    console.log('init value:',initialized);
     const ui = SpreadsheetApp.getUi();
     ui.createMenu('Sheet automation').addItem('Enable automation','addTriggers').addToUi();
 
@@ -26,6 +27,10 @@ function onOpen (e) {
 
 //This function will install the runOnEdit trigger and prevent the user from running too many times
 function addTriggers () {
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(t => {
+    if (t.getHandlerFunction() === 'runOnEdit') ScriptApp.deleteTrigger(t);
+  });
   ScriptApp.newTrigger('runOnEdit').forSpreadsheet(SpreadsheetApp.getActive()).onEdit().create(); //Install the trigger
   const time = new Date().getTime();
   const props = PropertiesService.getDocumentProperties();
@@ -43,12 +48,11 @@ function onEdit (e) {
   const props = PropertiesService.getDocumentProperties();
   const log = JSON.parse(props.getProperty('simpleLog')) || []; //This is the log of times the simple trigger ran
   const log2 = JSON.parse(props.getProperty('installableLog')) || []; //This is the log of times the installable trigger ran
-  const buffer = 2 * 60 * 1000; //Check to see if there's a matching entry within 2 minutes of each other
+  const buffer = 2 * 60 * 1000; //calculate a buffer in miliseconds (2 minutes)
   let match = false;
   for (let i = 0; i < log.length; i++) {
     for (let j = 0; j < log2.length; j++) {
-      if (Math.abs(log[i] - log2[j]) <= buffer) {
-        match = true; //Record if we've found at least 1 timestamp on both logs that are within 2 minutes of each other
+      if (Math.abs(log[i] - log2[j]) <= buffer) { //Check to see if there's a matching entry within the buffer of each other        match = true; //Record if we've found at least 1 timestamp on both logs that are within 2 minutes of each other
         break;
       }
     }
@@ -88,9 +92,9 @@ function runOnEdit(e) {
 
   const actionSheets = ['Transactions','Archived Transactions','Recurring Transactions','Import Tool']; //List of sheets that have runOnEdit triggers
 
-  if (!actionSheets.includes(sheetName)) return; //End execution if the end was not on a sheet in the list
+  if (!actionSheets.includes(sheetName)) return; //End execution if the edit was not on a sheet in the list
 
-  if (sheetName === 'Transactions') {
+  if (sheetName === 'Transactions' || sheetName === 'Archived Transactions') {
     if (event.range.rowStart === event.range.rowEnd && event.range.columnStart === event.range.columnEnd) { //If only one cell was edited
       const checkTitle = sheet.getRange(event.range.rowStart - 1,event.range.columnStart).getValue(); //Get the title of the checked box
       if (checkTitle === 'Advance Late Transactions') { //Advance late transactions
@@ -117,18 +121,6 @@ function runOnEdit(e) {
       if (checkTitle === 'Reconcile Selected as Planned for Today') {
         e.range.setValue(false);
         reconcile('today');
-      }
-    }
-    return;
-  }
-  if (sheetName === 'Archived Transactions') {
-    if (event.range.rowStart === event.range.rowEnd && event.range.columnStart === event.range.columnEnd) {//If only one cell was edited
-      if (e.value !== 'TRUE') return;
-
-      const checkTitle = sheet.getRange(event.range.rowStart - 1,event.range.columnStart).getValue(); //Get the title of the checked box
-      if (checkTitle === 'Sort Transactions') {
-        e.range.setValue(false); //Reset the checkbox
-        sortTrans(sheetName);
       }
     }
     return;
