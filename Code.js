@@ -6,9 +6,20 @@
  *  
  */
 
+const props = PropertiesService.getDocumentProperties();
+const getSSId = () => {
+  const propsSSId = props.getProperty('ssid');
+  if (propsSSId) return propsSSId;
+  else {
+    const id = SpreadsheetApp.getActive().getId();
+    props.setProperty('ssid',id);
+    return id;
+  }
+}
+const ssid = getSSId();
+
 //Simple trigger that runs when the spreadsheet is first opened. I'm using it to help the user install the runOnEdit installable trigger that is necessary for this script to be triggered from the spreadsheet
 function onOpen (e) {
-  const props = PropertiesService.getDocumentProperties();
   const initialized = props.getProperty('init'); //We're using a script property to track if the trigger is installed
   if (initialized !== 'true') {
     console.log('init value:',initialized);
@@ -33,7 +44,6 @@ function addTriggers () {
   });
   ScriptApp.newTrigger('runOnEdit').forSpreadsheet(SpreadsheetApp.getActive()).onEdit().create(); //Install the trigger
   const time = new Date().getTime();
-  const props = PropertiesService.getDocumentProperties();
   props.setProperty('init','true'); //Record that we've installed the trigger
   props.setProperty('simpleLog',JSON.stringify([time])); //Record the time in the edit logs to prevent the menu from erroneously appearing again
   props.setProperty('installableLog',JSON.stringify([time]));
@@ -45,7 +55,6 @@ function addTriggers () {
 function onEdit (e) {
   const time = new Date().getTime();
   const logLength = 5; //Number of entries to look back for matches, reduce to increase sensitivity, increase to be more sure about the determination
-  const props = PropertiesService.getDocumentProperties();
   const log = JSON.parse(props.getProperty('simpleLog')) || []; //This is the log of times the simple trigger ran
   const log2 = JSON.parse(props.getProperty('installableLog')) || []; //This is the log of times the installable trigger ran
   const buffer = 2 * 60 * 1000; //calculate a buffer in miliseconds (2 minutes)
@@ -78,7 +87,6 @@ function runOnEdit(e) {
 
   //Save a log of times this function is triggered so we can check that it's executing using a simple onEdit trigger
   const logLength = 5; //Number of execution times to save to the log
-  const props = PropertiesService.getDocumentProperties();
   const log = JSON.parse(props.getProperty('installableLog')) || []; //Get previous log entries
   log.push(time); //Insert this execution into the log
   while (log.length > logLength) log.shift(); //Trim the log, if necessary
@@ -102,26 +110,31 @@ function runOnEdit(e) {
       if (checkTitle === 'Advance Late Transactions') { //Advance late transactions
         if (!['To today','To tomorrow'].includes(e.value)) return; //Allow user to select between two options to advance the date
 
-        e.range.setValue(''); //Reset the selector
+        //e.range.setValue(''); //Reset the selector
+        quickWrite(quickSheetId(sheetName),event.range.rowStart,event.range.columnStart,[['']]);
         advanceTransactions(e.value);
       }
 
       if (e.value !== 'TRUE') return; //End if the edited cell wasn't a checkbox
 
       if (checkTitle === 'Sort Transactions') { //Sort transactions
-        e.range.setValue(false); //Reset the checkbox
+        //e.range.setValue(false); //Reset the checkbox
+        quickWrite(quickSheetId(sheetName),event.range.rowStart,event.range.columnStart,[[false]]);
         sortTrans();
       }
       if (checkTitle === 'Change Selected to Today') { //Change selected to today
-        e.range.setValue(false); //Reset the checkbox
+        //e.range.setValue(false); //Reset the checkbox
+        quickWrite(quickSheetId(sheetName),event.range.rowStart,event.range.columnStart,[[false]]);
         reconcile('today',true);
       }
       if (checkTitle === 'Reconcile Selected as Planned') {
-        e.range.setValue(false);
+        //e.range.setValue(false);
+        quickWrite(quickSheetId(sheetName),event.range.rowStart,event.range.columnStart,[[false]]);
         reconcile();
       }
       if (checkTitle === 'Reconcile Selected as Planned for Today') {
-        e.range.setValue(false);
+        //e.range.setValue(false);
+        quickWrite(quickSheetId(sheetName),event.range.rowStart,event.range.columnStart,[[false]]);
         reconcile('today');
       }
     }
@@ -133,11 +146,13 @@ function runOnEdit(e) {
 
       const checkTitle = sheet.getRange(event.range.rowStart,event.range.columnStart + 1).getValue(); //Get the title of the checked box
       if (checkTitle === 'Process Month') {
-        e.range.setValue(false); //Reset the checkbox
+        //e.range.setValue(false); //Reset the checkbox
+        quickWrite(quickSheetId(sheetName),event.range.rowStart,event.range.columnStart,[[false]]);
         placeRecurring();
       }
       if (checkTitle === 'Archive Month') {
-        e.range.setValue(false); //Reset the checkbox
+        //e.range.setValue(false); //Reset the checkbox
+        quickWrite(quickSheetId(sheetName),event.range.rowStart,event.range.columnStart,[[false]]);
         archive();
       }
     }
@@ -149,7 +164,8 @@ function runOnEdit(e) {
     if (event.range.rowStart === event.range.rowEnd && event.range.columnStart === event.range.columnEnd) { //If only one cell was edited
       const checkImport = sheet.getRange(event.range.rowStart - 1,event.range.columnStart).getValue();
       if (checkImport !== 'Import') return;
-      e.range.setValue(false); //Reset the checkbox
+      //e.range.setValue(false); //Reset the checkbox
+      quickWrite(quickSheetId(sheetName),event.range.rowStart,event.range.columnStart,[[false]]);
       importData();
     }
     return;
@@ -161,13 +177,13 @@ function placeRecurring() {
   const firstTransRow = 5; //First row of transactions on the Transactions tab
   const firstRecurRow = 4; //First row of recurring transactions on the Recurring Transactions tab
   const ss = SpreadsheetApp.getActive();
-  const recurSheet = ss.getSheetById(942392736) || ss.getSheetByName('Recurring Transactions');
-  const transSheet = ss.getSheetById(1732160294) || ss.getSheetByName('Transactions');
+  //const recurSheet = ss.getSheetById(942392736) || ss.getSheetByName('Recurring Transactions');
+  //const transSheet = ss.getSheetById(1732160294) || ss.getSheetByName('Transactions');
 
-  const month = recurSheet.getRange('L2').getValue();
-  const year = recurSheet.getRange('L3').getValue();
+  const monthyear = quickRead(quickSheetId('Recurring Transactions'),getIndices('L2:L3'));
+  const month = monthyear[0][0];
+  const year = monthyear[1][0];
 
-  const props = PropertiesService.getDocumentProperties();
   const completedMonths = JSON.parse(props.getProperty('months')) || []; //Get list of previously processed months
   
   if (completedMonths.includes(month + year)) { //Check if this month has already been processed
@@ -201,7 +217,8 @@ function placeRecurring() {
   const oneDay = 24 * 60 * 60 * 1000; //One day in miliseconds
 
   //Get the recurring Expenses and sort them by date
-  const expenseData = recurSheet.getRange(`A${firstRecurRow}:D`).getValues();
+  //const expenseData = recurSheet.getRange(`A${firstRecurRow}:D`).getValues();
+  const expenseData = quickRead(quickSheetId('Recurring Transactions'),getIndices(`A${firstRecurRow}:D`));
   const expenses = !expenseData.join('') ? expenseData :
     expenseData.filter(r => r.join("") !== "").sort((a,b) => a[0] - b[0]).map(r => {
       r[0] = r[0] > maxDates[month] ? setDate(maxDates[month]) : setDate(r[0]); //Replace the day number with a full date being sure not to exceed the maximum number of days in the month
@@ -213,7 +230,8 @@ function placeRecurring() {
       return r;
     });
   //Repeat the same logic as above for the recurring Income list
-  const incomeData = recurSheet.getRange(`F${firstRecurRow}:I`).getValues();
+  //const incomeData = recurSheet.getRange(`F${firstRecurRow}:I`).getValues();
+  const incomeData = quickRead(quickSheetId('Recurring Transactions'),getIndices(`F${firstRecurRow}:I`));
   const income = !incomeData.join('') ? incomeData :
     incomeData.filter(r => r.join("") !== "").sort((a,b) => a[0] - b[0]).map(r => {
       r[0] = r[0] > maxDates[month] ? setDate(maxDates[month]) : setDate(r[0]);
@@ -225,8 +243,15 @@ function placeRecurring() {
       return r;
     });
 
-  const transExp = transSheet.getRange(`B${firstTransRow}:F`).getValues(); //Get the list of expenses already on the Transactions tab
-  const transInc = transSheet.getRange(`I${firstTransRow}:M`).getValues(); //Get the list of income already on the Transactions tab
+  //const transExp = transSheet.getRange(`B${firstTransRow}:F`).getValues(); //Get the list of expenses already on the Transactions tab
+  //const transInc = transSheet.getRange(`I${firstTransRow}:M`).getValues(); //Get the list of income already on the Transactions tab
+  const transValRequest = [
+    getIndices(`B${firstTransRow}:F`,quickSheetId('Transactions')),
+    getIndices(`I${firstTransRow}:M`,quickSheetId('Transactions'))
+  ];
+  const transData = bulkQuickRead(transValRequest);
+  const transExp = transData[0];
+  const transInc = transData[1];
 
   const nextRow = rng => rng.reduce((lastIndex,row,rowIndex) => { //Find the next open row in the list of transactions
     if (row.join('') !== '') return rowIndex + 1;
@@ -239,13 +264,30 @@ function placeRecurring() {
   if (!completedMonths.includes(month + year)) completedMonths.push(month + year); //Add this month to the list of processed months
   props.setProperty('months',JSON.stringify(completedMonths)); //Save the list of processed months to the properties service
 
-  if (expenses.join(''))
-    transSheet.getRange(nextExpRow,2,expenses.length,expenses[0].length).setValues(expenses); //Write the Expenses to the Transactions tab
-  if (income.join(''))
-    transSheet.getRange(nextIncRow,9,income.length,income[0].length).setValues(income); //Write the list of Income to the Transactions tab
+  const transOutRequest = [];
+  if (expenses.join('')) {
+    //transSheet.getRange(nextExpRow,2,expenses.length,expenses[0].length).setValues(expenses); //Write the Expenses to the Transactions tab
+    transOutRequest.push({
+      startRow: nextExpRow,
+      startCol: 2,
+      sheetId: quickSheetId('Transactions'),
+      data: expenses
+    });
+  }
+  if (income.join('')) {
+    //transSheet.getRange(nextIncRow,9,income.length,income[0].length).setValues(income); //Write the list of Income to the Transactions tab
+    transOutRequest.push({
+      startRow: nextIncRow,
+      startCol: 9,
+      sheetId: quickSheetId('Transactions'),
+      data: income
+    });
+  }
+  if (transOutRequest.length > 0) bulkQuickWrite(transOutRequest);
 
-  transSheet.getRange(`B${firstTransRow}:F`).sort({column: 2, ascending: false}); //Sort the list of Expenses
-  transSheet.getRange(`I${firstTransRow}:M`).sort({column: 9, ascending: false}); //Sort the list of Income
+  //transSheet.getRange(`B${firstTransRow}:F`).sort({column: 2, ascending: false}); //Sort the list of Expenses
+  //transSheet.getRange(`I${firstTransRow}:M`).sort({column: 9, ascending: false}); //Sort the list of Income
+  sortTrans();
 
   const prevSheetName = Utilities.formatDate(new Date(setDate(1).getTime() - (24 * 60 * 60 * 1000)),Session.getScriptTimeZone(),"MMM yyyy"); //Get the tab name of the month prior to the one that's being processed
   const nextSheetName = Utilities.formatDate(setDate(1),Session.getScriptTimeZone(),"MMM yyyy"); //Get the tab name of the month being processed
@@ -254,9 +296,16 @@ function placeRecurring() {
   if (!nextMonthSheet) { //Check if the processed month already has a sheet, continue if it doesn't exist already
     const prevMonthSheet = ss.getSheetByName(prevSheetName); //Get the prior month's sheet
     nextMonthSheet = prevMonthSheet.copyTo(ss).setName(nextSheetName); //Copy the prior month's sheet and rename it
-    nextMonthSheet.getRange('C7').setValue(setDate(1)); //Set the start date of the new month's sheet
-    nextMonthSheet.getRange('O12').setValue(""); //Reset the notes for the new sheet
-    nextMonthSheet.getRange('L8').setValue(""); //Clear the prior month's starting value in case it was set manually
+    //nextMonthSheet.getRange('C7').setValue(setDate(1)); //Set the start date of the new month's sheet
+    //nextMonthSheet.getRange('O12').setValue(""); //Reset the notes for the new sheet
+    //nextMonthSheet.getRange('L8').setValue(""); //Clear the prior month's starting value in case it was set manually
+    const nextMonthRequest = [
+      getIndices('C7',quickSheetId(nextSheetName)),
+      getIndices('O12',quickSheetId(nextSheetName)),
+      getIndices('L8',quickSheetId(nextSheetName))
+    ];
+    bulkQuickWrite(nextMonthRequest);
+
     nextMonthSheet.setActiveRange(nextMonthSheet.getRange('A1')); //Activate the new sheet
     ss.moveActiveSheet(2); //Sort the new sheet ahead of the previous
   }
@@ -271,8 +320,11 @@ function archive () {
   const transSheet = ss.getSheetById(1732160294) || ss.getSheetByName('Transactions'); //Transactions sheet
   const archiveSheet = ss.getSheetById(1366470246) || ss.getSheetByName('Archived Transactions'); //Archived Transactions sheet
 
-  const month = recurSheet.getRange('L7').getValue(); //Selected month on the recurring transactions sheet
-  const year = recurSheet.getRange('L8').getValue(); //Entered year on the recurring transactions sheet
+  //const month = recurSheet.getRange('L7').getValue(); //Selected month on the recurring transactions sheet
+  //const year = recurSheet.getRange('L8').getValue(); //Entered year on the recurring transactions sheet
+  const monthyear = quickRead(quickSheetId('Recurring Transactions'),getIndices('L7:L8'));
+  const month = monthyear[0][0];
+  const year = monthyear[1][0];
 
   const monthIndex = { //List of 0-index months
     January: 0,
@@ -294,10 +346,21 @@ function archive () {
   const oneDay = 24 * 60 * 60 * 1000; //Calculate the number of miliseconds in one day
   const endOfMonth = new Date(nextMonth - oneDay).getTime(); //Return the last day of the selected month in milisecond format
 
-  const archiveExp = archiveSheet.getRange(`B${firstArchiveRow}:F`).getValues(); //Previously archived expenses
-  const archiveInc = archiveSheet.getRange(`I${firstArchiveRow}:M`).getValues(); //Previously archived income
-  const transExp = transSheet.getRange(`B${firstTransRow}:F`).getValues(); //Current list of expenses
-  const transInc = transSheet.getRange(`I${firstTransRow}:M`).getValues(); //Current list of income
+  //const archiveExp = archiveSheet.getRange(`B${firstArchiveRow}:F`).getValues(); //Previously archived expenses
+  //const archiveInc = archiveSheet.getRange(`I${firstArchiveRow}:M`).getValues(); //Previously archived income
+  //const transExp = transSheet.getRange(`B${firstTransRow}:F`).getValues(); //Current list of expenses
+  //const transInc = transSheet.getRange(`I${firstTransRow}:M`).getValues(); //Current list of income
+  const requestData = [
+    getIndices(`B${firstArchiveRow}:F`,quickSheetId('Archived Transactions')),
+    getIndices(`I${firstArchiveRow}:M`),quickSheetId('Archived Transactions'),
+    getIndices(`B${firstTransRow}:F`),quickSheetId('Transactions'),
+    getIndices(`I${firstTransRow}:M`,quickSheetId('Transactions'))
+  ];
+  const responseData = bulkQuickRead(requestData);
+  const archiveExp = responseData[0];
+  const archiveInc = responseData[1];
+  const transExp = responseData[2];
+  const transInc = responseData[3];
 
   const nextRow = rng => rng.reduce((lastIndex,row,rowIndex) => { //Find the next empty row in a given range
     if (row.join('') !== '') return rowIndex + 1;
@@ -341,17 +404,33 @@ function archive () {
     else return false;
   });
 
-  archiveSheet.getRange(nextExpRow,2,monthExp.length,monthExp[0].length).setValues(monthExp); //Write the matching expenses to the archive
-  archiveSheet.getRange(nextIncRow,9,monthInc.length,monthInc[0].length).setValues(monthInc); //Write the matching income to the archive
+  //archiveSheet.getRange(nextExpRow,2,monthExp.length,monthExp[0].length).setValues(monthExp); //Write the matching expenses to the archive
+  //archiveSheet.getRange(nextIncRow,9,monthInc.length,monthInc[0].length).setValues(monthInc); //Write the matching income to the archive
+  bulkQuickWrite([
+    {
+      sheetId: quickSheetId('Archived Transactions'),
+      startRow: nextExpRow,
+      startCol: 2,
+      data: monthExp
+    },
+    {
+      sheetId: quickSheetId('Archived Transactions'),
+      startRow: nextIncRow,
+      startCol: 9,
+      data: monthInc
+    }
+  ]);
 
-  archiveSheet.getRange(`B${firstArchiveRow}:F`).sort({column: 2, ascending: false}); //Sort the archived expenses list
-  archiveSheet.getRange(`I${firstArchiveRow}:M`).sort({column: 9, ascending: false}); //Sort the archived income list
+  //archiveSheet.getRange(`B${firstArchiveRow}:F`).sort({column: 2, ascending: false}); //Sort the archived expenses list
+  //archiveSheet.getRange(`I${firstArchiveRow}:M`).sort({column: 9, ascending: false}); //Sort the archived income list
+  sortTrans('Archived Transactions');
 
   clearedExp.forEach(v => transSheet.getRange(v + firstTransRow,2,1,5).clearContent()); //Clear the moved expenses from Transactions
   clearedInc.forEach(v => transSheet.getRange(v + firstTransRow,9,1,5).clearContent()); //Clear the moved income from Transactions
 
-  transSheet.getRange(`B${firstTransRow}:F`).sort({column: 2, ascending: false}); //Sort the remaining expenses on Transactions
-  transSheet.getRange(`I${firstTransRow}:M`).sort({column: 9, ascending: false}); //Sort the remaining income on Transactions
+  //transSheet.getRange(`B${firstTransRow}:F`).sort({column: 2, ascending: false}); //Sort the remaining expenses on Transactions
+  //transSheet.getRange(`I${firstTransRow}:M`).sort({column: 9, ascending: false}); //Sort the remaining income on Transactions
+  sortTrans('Transactions');
 
   console.log('Archived '+monthExp.length+' expense transactions');
   console.log('Archived '+monthInc.length+' income transactions');
@@ -361,31 +440,39 @@ function archive () {
 
 //Use this function to reschedule any transactions that haven't yet been reconciled but are dated for today or earlier. The transactions will be moved to tomorrow (or today) and then the sheet will be sorted.
 function advanceTransactions (param = 'To tomorrow') {
-  const ss = SpreadsheetApp.getActive();
-  const sheet = ss.getSheetByName('Transactions');
-  const values = sheet.getDataRange().getValues();
+  //const ss = SpreadsheetApp.getActive();
+  //const sheet = ss.getSheetByName('Transactions');
+  const sheetId = quickSheetId('Transactions');
+  //const values = sheet.getDataRange().getValues();
+  const values = quickRead(sheetId);
 
   const headerRow = values.findIndex(v => v.includes('Plan Amount')); //Find the index of the header row
   
   const dateCols = [values[headerRow].indexOf('Date'),values[headerRow].lastIndexOf('Date')]; //Index of both Date columns
   const actualCols = [values[headerRow].indexOf('Actual Amount'),values[headerRow].lastIndexOf('Actual Amount')]; //Index of both Actual Amount columns
   const today = new Date(new Date().toDateString()).getTime(); //Roundabout way to get the same date value as a date entered by text
-  let needsSort = false;
   
+  const outputData = [];
   values.forEach((v,i) => {
     dateCols.forEach((d,j) => { //Runs for the list of Expenses and then the list of Income
       if (v[actualCols[j]] === "") { //Only run for unreconciled transactions
         if (( param === 'To today' && new Date(v[d]).getTime() < today ) ||
             ( param === 'To tomorrow' && new Date(v[d]).getTime() <= today)) { //Check if transaction is late
-          sheet.getRange(i+1,d+1).setValue(new Date(today + (param === 'To today' ? 0 : (24 * 60 * 60 * 1000)))); //Advance late transactions
-          needsSort = true; //Indicate if we need to sort
+          //sheet.getRange(i+1,d+1).setValue(new Date(today + (param === 'To today' ? 0 : (24 * 60 * 60 * 1000)))); //Advance late transactions
+          outputData.push({
+            sheetId: sheetId,
+            startRow: i + 1,
+            startCol: d + 1,
+            data: [[new Date(today + (param === 'To today' ? 0 : (24 * 60 * 60 * 1000)))]]
+          });
         }
       }
     });
   });
-
-  if (needsSort) sortTrans(); //Only sorts when transactions have been advanced
-  //sortTrans(); //Sorts every time this function is ran
+  if (outputData.length > 0) {
+    bulkQuickWrite(outputData);
+    sortTrans();
+  }
 }
 
 function reconcile (requestedDate = false, dateOnly = false) {
@@ -397,19 +484,28 @@ function reconcile (requestedDate = false, dateOnly = false) {
 
   console.log(date);
 
-  const ss = SpreadsheetApp.getActive();
-  const sheet = ss.getSheetByName('Transactions');
-  const sheetVals = sheet.getDataRange().getValues(); //We need to load all of the values to search for checked boxes
+  //const ss = SpreadsheetApp.getActive();
+  //const sheet = ss.getSheetByName('Transactions');
+  const sheetId = quickSheetId('Transactions');
+  //const sheetVals = sheet.getDataRange().getValues(); //We need to load all of the values to search for checked boxes
+  const sheetVals = quickRead(sheetId);
   const headerRow = sheetVals.findIndex(v => v.includes('Plan Amount')); //Find the index of the header row
 
   const firstIndex = sheetVals[headerRow].indexOf('Date') - 1; //Get the first column labeled Date in the header row and decrease by 1
   const lastIndex = sheetVals[headerRow].lastIndexOf('Date') - 1; //Get the last column labeled Date in the header row and decrease by 1
+  const outputData = [];
   sheetVals.forEach((v,i) => {
     if (v[firstIndex] === true || v[firstIndex] === 'TRUE') { //Look for any rows in the Expenses column that's checked
       const outputDate = date ? date : v[firstIndex + 1];
       const amount = v[firstIndex + 2];
       const output = dateOnly ? [false,outputDate] : [false,outputDate,amount,amount];
-      sheet.getRange(1 + i, 1 + firstIndex, 1, output.length).setValues([output]); //Reset the checkbox and set the requested values
+      //sheet.getRange(1 + i, 1 + firstIndex, 1, output.length).setValues([output]); //Reset the checkbox and set the requested values
+      outputData.push({
+        sheetId: sheetId,
+        startRow: i + 1,
+        startCol: firstIndex + 1,
+        data: [output]
+      });
     }
   });
   sheetVals.forEach((v,i) => {
@@ -417,18 +513,29 @@ function reconcile (requestedDate = false, dateOnly = false) {
       const outputDate = date ? date : v[lastIndex + 1];
       const amount = v[lastIndex + 2];
       const output = dateOnly ? [false,outputDate] : [false,outputDate,amount,amount];
-      sheet.getRange(1 + i, 1 + lastIndex, 1, output.length).setValues([output]); //Reset the checkbox and change the date to today
+      //sheet.getRange(1 + i, 1 + lastIndex, 1, output.length).setValues([output]); //Reset the checkbox and change the date to today
+      outputData.push({
+        sheetId: sheetId,
+        startRow: i + 1,
+        startCol: lastIndex + 1,
+        data: [output]
+      });
     }
   });
+  if (outputData.length > 0) {
+    bulkQuickWrite(outputData);
+  }
 }
 
 //Process the data from the Import Tools tab to the Transactions tab
 function importData () {
-  const ss = SpreadsheetApp.getActive();
-  const inSheet = ss.getSheetByName('Import Tool');
-  const outSheet = ss.getSheetByName('Transactions');
-  const inValues = inSheet.getDataRange().getValues();
-  const outValues = outSheet.getDataRange().getValues();
+  //const ss = SpreadsheetApp.getActive();
+  //const inSheet = ss.getSheetByName('Import Tool');
+  //const outSheet = ss.getSheetByName('Transactions');
+  //const inValues = inSheet.getDataRange().getValues();
+  const inValues = quickRead(quickSheetId('Import Tool'));
+  //const outValues = outSheet.getDataRange().getValues();
+  const outValues = quickRead(quickSheetId('Transactions'));
   const headerRow = outValues.findIndex(v => v.includes('Plan Amount')); //Find the index of the header row
   const inHeaders = inValues.shift(); //Save the headers for the import data
   const outHeaders = outValues[headerRow]; //Save the headers for the transaction data
@@ -483,11 +590,34 @@ function importData () {
   const nextExpRow = nextRow(expTrans) + headerRow + 2; //Returns the next empty expenses row on the archive sheet
   const nextIncRow = nextRow(incTrans) + headerRow + 2; //Returns the next empty income row on the archive sheet
 
-  outSheet.getRange(nextExpRow,outHeaders.indexOf('Date')+1,outExp.length,outExp[0].length).setValues(outExp);
-  outSheet.getRange(nextIncRow,outHeaders.lastIndexOf('Date')+1,outInc.length,outInc[0].length).setValues(outInc);
+  //outSheet.getRange(nextExpRow,outHeaders.indexOf('Date')+1,outExp.length,outExp[0].length).setValues(outExp);
+  //outSheet.getRange(nextIncRow,outHeaders.lastIndexOf('Date')+1,outInc.length,outInc[0].length).setValues(outInc);
 
   const inCols = inHeaders.filter(Boolean).length; //Get the number of columns in the import sheet
-  inSheet.getRange(2,1,inSheet.getLastRow(),inCols).clear(); //Clears the imported data
+  //inSheet.getRange(2,1,inSheet.getLastRow(),inCols).clear(); //Clears the imported data
+
+  const outputData = [
+    {
+      sheetId: quickSheetId('Transactions'),
+      startRow: nextExpRow,
+      startCol: outHeaders.indexOf('Date') + 1,
+      data: outExp
+    },
+    {
+      sheetId: quickSheetId('Transactions'),
+      startRow: nextIncRow,
+      startCol: outHeaders.lastIndexOf('Date') + 1,
+      data: outInc
+    },
+    {
+      sheetId: quickSheetId('Import Tool'),
+      startRow: 2,
+      startCol: 1,
+      data: makeSquare([[].length = inCols] = inValues.length)
+    }
+  ]
+
+  bulkQuickWrite(outputData);
 
   sortTrans(); //Sort the Transactions tab
 }
@@ -503,36 +633,9 @@ function sortTrans(sheetName = 'Transactions') {
   incomeRange.sort({column: 9, ascending: false});
 }
 
-//Gets a list of US holidays for the given year
-function getHolidays(year = 2026) {
-  const url = "https://date.nager.at/api/v4/PublicHolidays/" + year + "/US";
-  
-  try {
-    const response = UrlFetchApp.fetch(url);
-    const holidays = JSON.parse(response.getContentText());
-
-    const holidayDates = holidays.map(holiday => {
-      const dateParts = holiday.observedDate.split('-'); //Splits the date to [year, month, day]
-      if  (holiday.holidayTypes.includes('Public') && 
-           (holiday.nationalHoliday === true || holiday.localName === 'Columbus Day') //The latest version doesn't list Columbus Day as a national holiday so we'll manually check that one
-          ) return new Date(dateParts[1] + "/" + dateParts[2] + "/" + dateParts[0]).toLocaleDateString(); //Get the date as a date object
-      else return false;
-    }).filter(Boolean); //Filter out non-national holidays
-
-    return holidayDates;
-  }
-  catch (e) {
-    console.log("Error: " + e.toString());
-    return [];
-  }
-}
-
-// Function to keep only columns at selected indices
-function selectColumns(dataArray, columnIndicesToSelect) {
-    return dataArray.map(row => {
-        // Use filter to select elements whose index is in the list of indices given
-        return row.filter((cell, cellIndex) => {
-            return columnIndicesToSelect.includes(cellIndex);
-        });
-    });
+function doGet (e) {
+  const html = HtmlService.createTemplateFromFile(e.parameter.page);
+  if (e.parameter.page === 'expenses')
+    html.data = JSON.stringify(SpreadsheetApp.getActive().getSheetByName('Transactions').getRange('B5:G').getValues());
+  return html.evaluate();
 }
